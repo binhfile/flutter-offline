@@ -30,6 +30,7 @@ type Package struct {
 	Name         string // ex: easy_localization
 	Version      string // ex: 3.0.3
 	ArchiveUrl   string
+	Info         string
 	Dependencies []*Package
 }
 
@@ -61,7 +62,7 @@ func main() {
 			return
 		}
 		for k, v := range spec {
-			if k == "dependencies" || k == "dev_dependencies" {
+			if k == "dependencies" /*|| k == "dev_dependencies"*/ {
 				if vMap, ok := v.(map[string]interface{}); ok {
 					for k1, v1 := range vMap {
 						if v1Map, ok := v1.(map[string]interface{}); ok {
@@ -102,12 +103,13 @@ func main() {
 				return
 			}
 			if len(info.ArchiveUrl) == 0 {
-				log.Fatalf("cannot find %v %v", p.Name, p.Version)
-				return
+				log.Printf("cannot find %v %v", p.Name, p.Version)
+				continue
 			}
 			packages[idx].Dependencies = info.Dependencies
 			packages[idx].ArchiveUrl = info.ArchiveUrl
 			packages[idx].Version = info.Version
+			packages[idx].Info = info.Info
 
 			for _, dep := range info.Dependencies {
 				exists := false
@@ -141,23 +143,39 @@ func main() {
 	os.MkdirAll(args.OutDir, 0777)
 	for _, p := range packages {
 		log.Printf("%v %v %v %v", p.Name, p.Version, p.ArchiveUrl, len(p.Dependencies))
-		data, err := getApi(p.ArchiveUrl)
-		if err != nil {
-			log.Fatal(err.Error())
-			return
-		}
-		fileName := filepath.Base(p.ArchiveUrl)
-		fileOutputPath := filepath.Join(args.OutDir, p.Name+"@"+fileName)
-		if _, err := os.Stat(fileOutputPath); errors.Is(err, os.ErrNotExist) {
-			file, err := os.Create(fileOutputPath)
-			if err != nil {
-				log.Fatal(err.Error())
-				return
+		// info
+		{
+			fileOutputPath := filepath.Join(args.OutDir, p.Name+"@info")
+			if _, err := os.Stat(fileOutputPath); errors.Is(err, os.ErrNotExist) {
+				file, err := os.Create(fileOutputPath)
+				if err != nil {
+					log.Fatal(err.Error())
+					return
+				}
+				file.Write([]byte(p.Info))
+				file.Close()
 			}
-			file.Write(data)
-			file.Close()
-		} else {
-			log.Printf("  cached")
+		}
+		// archive
+		if len(p.ArchiveUrl) > 0 {
+			fileName := filepath.Base(p.ArchiveUrl)
+			fileOutputPath := filepath.Join(args.OutDir, p.Name+"@"+fileName)
+			if _, err := os.Stat(fileOutputPath); errors.Is(err, os.ErrNotExist) {
+				data, err := getApi(p.ArchiveUrl)
+				if err != nil {
+					log.Fatal(err.Error())
+					return
+				}
+				file, err := os.Create(fileOutputPath)
+				if err != nil {
+					log.Fatal(err.Error())
+					return
+				}
+				file.Write(data)
+				file.Close()
+			} else {
+				log.Printf("  cached")
+			}
 		}
 	}
 
@@ -170,10 +188,11 @@ type PubDevPackageVersion struct {
 	ArchiveUrl string               `json:"archive_url"`
 }
 type PubDevPackagePubspec struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	Version      string                 `json:"version"`
-	Dependencies map[string]interface{} `json:"dependencies"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	Version         string                 `json:"version"`
+	Dependencies    map[string]interface{} `json:"dependencies"`
+	DevDependencies map[string]interface{} `json:"dev_dependencies"`
 }
 type PubDevPackage struct {
 	Name     string                 `json:"name"`
@@ -198,6 +217,7 @@ func getPackageInfoFromPubDev(pkgName string, pkgVer string) (*Package, error) {
 	result := &Package{
 		Name:         pkgName,
 		Version:      pkgVer,
+		Info:         string(data),
 		Dependencies: make([]*Package, 0),
 	}
 	for _, ver := range pubDevPackage.Versions {
@@ -219,6 +239,22 @@ func getPackageInfoFromPubDev(pkgName string, pkgVer string) (*Package, error) {
 
 				}
 			}
+			/*for k1, v1 := range ver.Pubspec.DevDependencies {
+				if vString, ok := v1.(string); ok {
+					vString = strings.Trim(vString, "^")
+					if idx := strings.LastIndex(vString, "<="); idx != -1 {
+						vString = vString[idx+2:]
+					} else if idx := strings.LastIndex(vString, "<"); idx != -1 {
+						vString = vString[idx+1:]
+					}
+					result.Dependencies = append(result.Dependencies, &Package{
+						Name:    k1,
+						Version: vString,
+					})
+					log.Printf("  dependency %v %v", k1, vString)
+
+				}
+			}*/
 			break
 		}
 	}
